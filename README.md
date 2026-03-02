@@ -2,6 +2,10 @@
 
 A single-file React app that estimates LLM memory usage (VRAM/RAM) by model size, quantization format, and runtime overhead.
 
+## Online Demo
+
+https://crapthings.github.io/llmmc/
+
 ## Features
 
 - Model size input with common presets (`1.5B` to `671B`)
@@ -24,7 +28,7 @@ Total (GB)  = Memory * (1 + OverheadPercent / 100)
 
 No build step required.
 
-1. Open `index.html` directly in a browser, or
+1. Double-click `index.html` (or open it directly in a browser), or
 2. Serve with a local static server for best results:
 
 ```bash
