@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LLM Memory Calculator | Estimate VRAM for Quantized LLMs</title>
+    <meta
+      name="description"
+      content="Estimate LLM VRAM usage across FP32, FP16, INT8, GPTQ/AWQ 4-bit, and GGUF quantizations with configurable overhead and GPU fit checks."
+    />
+    <meta
+      name="keywords"
+      content="LLM memory calculator, VRAM calculator, quantization, GGUF, GPTQ, AWQ, GPU fit, model size"
+    />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="theme-color" content="#f5f5f4" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="LLM Memory Calculator" />
+    <meta
+      property="og:description"
+      content="Quickly estimate memory requirements for LLM quantization formats and compare against common GPU VRAM sizes."
+    />
+    <meta property="og:site_name" content="LLM Memory Calculator" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="LLM Memory Calculator" />
+    <meta
+      name="twitter:description"
+      content="Estimate LLM memory usage by model size, quantization, and overhead. Includes GPU fit guidance."
+    />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "LLM Memory Calculator",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Any",
+        "description": "Estimate VRAM usage for large language models across quantization methods and overhead settings."
+      }
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  </head>
+  <body class="bg-stone-100">
+    <div id="root"></div>
+
+    <script type="text/babel">
+      const { useState, useMemo } = React;
+
+      const Cpu = ({ className = '' }) => (
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={className}
+        >
+          <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+          <rect x="9" y="9" width="6" height="6"></rect>
+          <path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"></path>
+        </svg>
+      );
+
+      const Info = ({ className = '' }) => (
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={className}
+        >
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M12 16v-4M12 8h.01"></path>
+        </svg>
+      );
+
+      const quantizationOptions = [
+        { name: 'FP32', bitsPerParam: 32, desc: '32-bit float', category: 'Precision' },
+        { name: 'FP16 / BF16', bitsPerParam: 16, desc: '16-bit float', category: 'Precision' },
+        { name: 'INT8', bitsPerParam: 8, desc: '8-bit integer', category: 'Quantized' },
+        { name: 'GPTQ / AWQ 4-bit', bitsPerParam: 4, desc: '4-bit integer', category: 'Quantized' },
+        { name: 'Q8_0', bitsPerParam: 8.5, desc: '~8.5 bpw', category: 'GGUF' },
+        { name: 'Q6_K', bitsPerParam: 6.6, desc: '~6.6 bpw', category: 'GGUF' },
+        { name: 'Q5_K_M', bitsPerParam: 5.7, desc: '~5.7 bpw', category: 'GGUF' },
+        { name: 'Q5_K_S', bitsPerParam: 5.5, desc: '~5.5 bpw', category: 'GGUF' },
+        { name: 'Q4_K_M', bitsPerParam: 4.8, desc: '~4.8 bpw', category: 'GGUF' },
+        { name: 'Q4_K_S', bitsPerParam: 4.5, desc: '~4.5 bpw', category: 'GGUF' },
+        { name: 'Q3_K_M', bitsPerParam: 3.9, desc: '~3.9 bpw', category: 'GGUF' },
+        { name: 'Q2_K', bitsPerParam: 2.6, desc: '~2.6 bpw', category: 'GGUF' },
+      ];
+
+      const gpuGroups = [
+        {
+          label: 'Consumer',
+          gpus: [
+            { name: 'RTX 3060', vram: 12 },
+            { name: 'RTX 3080', vram: 10 },
+            { name: 'RTX 3090', vram: 24 },
+            { name: 'RTX 4060', vram: 8 },
+            { name: 'RTX 4070TiS', vram: 16 },
+            { name: 'RTX 4080S', vram: 16 },
+            { name: 'RTX 4090', vram: 24 },
+            { name: 'RTX 5090', vram: 32 },
+          ],
+        },
+        {
+          label: 'Professional',
+          gpus: [
+            { name: 'RTX 6000 Ada', vram: 48 },
+            { name: 'RTX PRO 6000', vram: 96 },
+          ],
+        },
+        {
+          label: 'Data Center',
+          gpus: [
+            { name: 'H100 80G', vram: 80 },
+            { name: 'H200 141G', vram: 141 },
+          ],
+        },
+      ];
+
+      const presets = [
+        { label: '1.5B', value: '1.5' },
+        { label: '3B', value: '3' },
+        { label: '7B', value: '7' },
+        { label: '8B', value: '8' },
+        { label: '13B', value: '13' },
+        { label: '14B', value: '14' },
+        { label: '32B', value: '32' },
+        { label: '70B', value: '70' },
+        { label: '72B', value: '72' },
+        { label: '405B', value: '405' },
+        { label: '671B', value: '671' },
+      ];
+
+      const categories = ['Precision', 'Quantized', 'GGUF'];
+
+      function LLMCalculator() {
+        const [params, setParams] = useState('7');
+        const [overhead, setOverhead] = useState(20);
+
+        const paramNum = parseFloat(params) || 0;
+
+        const results = useMemo(() => {
+          return quantizationOptions.map((q) => {
+            const baseGB = (paramNum * 1e9 * q.bitsPerParam / 8) / (1024 ** 3);
+            const totalGB = baseGB * (1 + overhead / 100);
+            return { ...q, baseGB, totalGB };
+          });
+        }, [paramNum, overhead]);
+
+        const maxMem = Math.max(...results.map((r) => r.totalGB), 0.01);
+
+        const fmt = (gb) => {
+          if (gb < 0.01) return '—';
+          if (gb < 1) return `${(gb * 1024).toFixed(0)} MB`;
+          if (gb < 10) return `${gb.toFixed(2)} GB`;
+          return `${gb.toFixed(1)} GB`;
+        };
+
+        const barBg = (gb) => {
+          if (gb <= 8) return 'bg-lime-400';
+          if (gb <= 16) return 'bg-lime-500';
+          if (gb <= 24) return 'bg-yellow-400';
+          if (gb <= 48) return 'bg-amber-400';
+          if (gb <= 96) return 'bg-orange-400';
+          return 'bg-red-400';
+        };
+
+        const valColor = (gb) => {
+          if (gb <= 8) return 'text-lime-700';
+          if (gb <= 16) return 'text-lime-800';
+          if (gb <= 24) return 'text-yellow-700';
+          if (gb <= 48) return 'text-amber-700';
+          if (gb <= 96) return 'text-orange-700';
+          return 'text-red-700';
+        };
+
+        const refQuant = results.find((r) => r.name === 'Q4_K_M');
+
+        const gpuStatus = (vram, need) => {
+          if (vram >= need * 1.15) return 'ok';
+          if (vram >= need) return 'tight';
+          return 'no';
+        };
+
+        return (
+          <div
+            style={{ display: 'grid', gridTemplateColumns: '320px 1fr', height: '100vh' }}
+            className="bg-stone-100 text-stone-800 p-4 gap-4 overflow-hidden"
+          >
+            <div className="flex flex-col gap-3 overflow-auto min-h-0" style={{ maxHeight: 'calc(100vh - 32px)' }}>
+              <div className="flex items-center gap-2">
+                <Cpu className="w-5 h-5 text-lime-700 flex-shrink-0" />
+                <h1 className="text-base font-extrabold text-stone-900 tracking-tight">LLM Memory Calculator</h1>
+              </div>
+
+              <div className="bg-white rounded-2xl p-4">
+                <div className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-3">Configuration</div>
+
+                <label className="block text-xs font-medium text-stone-400 mb-1">Model Size</label>
+                <div className="relative mb-2">
+                  <input
+                    type="number"
+                    value={params}
+                    onChange={(e) => setParams(e.target.value)}
+                    className="w-full bg-stone-50 rounded-xl px-3 py-2 text-2xl font-bold text-stone-900 focus:outline-none focus:ring-2 focus:ring-lime-400 placeholder-stone-300"
+                    placeholder="7"
+                    min="0"
+                    step="0.1"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-300 font-semibold">B</span>
+                </div>
+
+                <div className="flex flex-wrap gap-1 mb-3">
+                  {presets.map((p) => (
+                    <button
+                      key={p.value}
+                      onClick={() => setParams(p.value)}
+                      className={`px-2 py-1 rounded-lg text-xs font-bold transition-all ${
+                        params === p.value
+                          ? 'bg-lime-700 text-white'
+                          : 'bg-stone-100 text-stone-400 hover:bg-stone-200 hover:text-stone-600'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+
+                <label className="block text-xs font-medium text-stone-400 mb-1">Overhead</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    value={overhead}
+                    onChange={(e) => setOverhead(Math.max(0, Math.min(200, parseInt(e.target.value, 10) || 0)))}
+                    className="w-full bg-stone-50 rounded-xl px-3 py-1.5 text-lg font-bold text-stone-900 focus:outline-none focus:ring-2 focus:ring-lime-400"
+                    min="0"
+                    max="200"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-300 font-semibold text-sm">%</span>
+                </div>
+              </div>
+
+              {refQuant && paramNum > 0 && (
+                <div className="bg-white rounded-2xl p-4">
+                  <div className="flex items-baseline justify-between mb-2">
+                    <span className="text-xs font-bold text-stone-400 uppercase tracking-widest">GPU Fit</span>
+                    <span className="text-xs text-stone-500 font-semibold">Q4_K_M · {fmt(refQuant.totalGB)}</span>
+                  </div>
+                  <div className="space-y-2.5">
+                    {gpuGroups.map((group) => (
+                      <div key={group.label}>
+                        <div className="text-xs font-medium text-stone-300 mb-1 uppercase tracking-wider">{group.label}</div>
+                        <div className="grid grid-cols-2 gap-1">
+                          {group.gpus.map((gpu) => {
+                            const st = gpuStatus(gpu.vram, refQuant.totalGB);
+                            const bg = st === 'ok' ? 'bg-lime-50' : st === 'tight' ? 'bg-amber-50' : 'bg-stone-50';
+                            const tx = st === 'ok' ? 'text-lime-800' : st === 'tight' ? 'text-amber-700' : 'text-stone-400';
+                            const sub = st === 'ok' ? 'text-lime-500' : st === 'tight' ? 'text-amber-500' : 'text-stone-300';
+                            const icon = st === 'ok' ? '✓' : st === 'tight' ? '⚠' : '✗';
+                            return (
+                              <div key={gpu.name} className={`rounded-xl px-2 py-1.5 ${bg}`}>
+                                <div className={`text-xs font-bold leading-tight ${tx}`}>{gpu.name}</div>
+                                <div className={`text-xs ${sub}`}>{gpu.vram}G {icon}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="bg-stone-200/40 rounded-2xl px-4 py-3">
+                <div className="flex items-start gap-2">
+                  <Info className="w-3.5 h-3.5 text-stone-400 mt-0.5 shrink-0" />
+                  <div className="text-xs text-stone-400 leading-relaxed space-y-0.5">
+                    <p><span className="text-stone-500 font-semibold">Formula</span> &nbsp;Params × BPW ÷ 8 × (1 + OH%)</p>
+                    <p><span className="text-stone-500 font-semibold">Overhead</span> &nbsp;KV cache, activations, runtime</p>
+                    <p><span className="text-stone-500 font-semibold">Note</span> &nbsp;Actual VRAM varies by context, batch &amp; framework</p>
+                    <div className="flex flex-wrap gap-x-2 gap-y-0.5 pt-1.5">
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-lime-400 inline-block"></span>≤8G</span>
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-lime-500 inline-block"></span>≤16G</span>
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-400 inline-block"></span>≤24G</span>
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>≤48G</span>
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-400 inline-block"></span>≤96G</span>
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400 inline-block"></span>&gt;96G</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="min-h-0 overflow-auto" style={{ maxHeight: 'calc(100vh - 32px)' }}>
+              {paramNum > 0 ? (
+                <div className="bg-white rounded-2xl p-5 h-full">
+                  <div className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-4">
+                    Memory Estimates — {paramNum}B Parameters
+                  </div>
+                  <div className="space-y-5">
+                    {categories.map((cat) => {
+                      const items = results.filter((r) => r.category === cat);
+                      return (
+                        <div key={cat}>
+                          <div className="text-xs font-bold text-lime-700 uppercase tracking-wider mb-2 flex items-center gap-2">
+                            <span>{cat}</span>
+                            <span className="flex-1 h-px bg-stone-100"></span>
+                          </div>
+                          <div className="space-y-1">
+                            {items.map((r, i) => (
+                              <div
+                                key={r.name}
+                                className={`flex items-center gap-4 px-3 py-2 rounded-xl ${
+                                  i % 2 === 0 ? 'bg-stone-50' : ''
+                                }`}
+                              >
+                                <div className="w-36 flex-shrink-0">
+                                  <div className="text-sm font-bold text-stone-700">{r.name}</div>
+                                  <div className="text-xs text-stone-300">{r.desc}</div>
+                                </div>
+                                <div className="flex-1">
+                                  <div className="bg-stone-100 rounded-full h-2 overflow-hidden">
+                                    <div
+                                      className={`h-full rounded-full transition-all duration-500 ${barBg(r.totalGB)}`}
+                                      style={{ width: `${Math.min((r.totalGB / maxMem) * 100, 100)}%` }}
+                                    />
+                                  </div>
+                                </div>
+                                <div className="w-20 text-right flex-shrink-0">
+                                  <div className={`text-sm font-extrabold tabular-nums ${valColor(r.totalGB)}`}>
+                                    {fmt(r.totalGB)}
+                                  </div>
+                                  <div className="text-xs text-stone-300">{fmt(r.baseGB)}</div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-white rounded-2xl h-full flex items-center justify-center">
+                  <div className="text-center">
+                    <Cpu className="w-12 h-12 text-stone-200 mx-auto mb-3" />
+                    <p className="text-sm text-stone-400 font-medium">Enter model parameters to begin</p>
+                    <p className="text-xs text-stone-300 mt-1">Select a preset or type a custom value</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      }
+
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(<LLMCalculator />);
+    </script>
+  </body>
+</html>
