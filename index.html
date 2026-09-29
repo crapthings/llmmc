@@ -110,21 +110,53 @@
             { name: 'RTX 4070TiS', vram: 16 },
             { name: 'RTX 4080S', vram: 16 },
             { name: 'RTX 4090', vram: 24 },
+            { name: 'RTX 5050', vram: 8 },
+            { name: 'RTX 5060', vram: 8 },
+            { name: 'RTX 5060 Ti 8G', vram: 8 },
+            { name: 'RTX 5060 Ti 16G', vram: 16 },
+            { name: 'RTX 5070', vram: 12 },
+            { name: 'RTX 5070 Ti', vram: 16 },
+            { name: 'RTX 5080', vram: 16 },
             { name: 'RTX 5090', vram: 32 },
           ],
         },
         {
           label: 'Professional',
           gpus: [
-            { name: 'RTX 6000 Ada', vram: 48 },
             { name: 'RTX PRO 6000', vram: 96 },
+            { name: 'RTX PRO 6000 WK', vram: 96 },
+            { name: 'RTX PRO 4500', vram: 32 },
+            { name: 'RTX PRO 4500 SE', vram: 32 },
+            { name: 'RTX PRO 4000', vram: 24 },
+            { name: 'RTX 6000 Ada', vram: 48 },
+            { name: 'RTX 4000 Ada', vram: 20 },
+            { name: 'RTX 2000 Ada', vram: 16 },
           ],
         },
         {
           label: 'Data Center',
+          note: 'VRAM per GPU · Cloud entries use provider-listed capacity',
           gpus: [
-            { name: 'H100 80G', vram: 80 },
-            { name: 'H200 141G', vram: 141 },
+            { name: 'B300 288G (Cloud)', vram: 288 },
+            { name: 'B300 270G (HGX)', vram: 270 },
+            { name: 'B200 180G', vram: 180 },
+            { name: 'H200 NVL (Cloud)', vram: 143 },
+            { name: 'H200 SXM', vram: 141 },
+            { name: 'H100 NVL', vram: 94 },
+            { name: 'H100 SXM', vram: 80 },
+            { name: 'H100 PCIe', vram: 80 },
+            { name: 'L40S', vram: 48 },
+            { name: 'L40', vram: 48 },
+            { name: 'L4', vram: 24 },
+            { name: 'AMD MI300X', vram: 192 },
+          ],
+        },
+        {
+          label: 'MIG Instances',
+          note: 'VRAM per partition, not the full GPU',
+          gpus: [
+            { name: 'PRO 6000 MIG 48G', vram: 48 },
+            { name: 'PRO 6000 MIG 24G', vram: 24 },
           ],
         },
       ];
@@ -196,9 +228,42 @@
 
         return (
           <div
-            style={{ display: 'grid', gridTemplateColumns: '320px 1fr', height: '100vh' }}
-            className="bg-stone-100 text-stone-800 p-4 gap-4 overflow-hidden"
+            style={{ display: 'grid', gridTemplateColumns: '320px 280px minmax(440px, 1fr)', height: '100vh' }}
+            className="bg-stone-100 text-stone-800 p-4 gap-4 overflow-x-auto"
           >
+            <div className="min-h-0 overflow-auto" style={{ maxHeight: 'calc(100vh - 32px)' }}>
+              <div className="bg-white rounded-2xl p-4">
+                <div className="flex items-baseline justify-between mb-2">
+                  <span className="text-xs font-bold text-stone-400 uppercase tracking-widest">GPU Fit</span>
+                  <span className="text-xs text-stone-500 font-semibold">Q4_K_M · {paramNum > 0 ? fmt(refQuant.totalGB) : '—'}</span>
+                </div>
+                <div className="space-y-2.5">
+                  {gpuGroups.map((group) => (
+                    <div key={group.label}>
+                      <div className="text-xs font-medium text-stone-300 mb-1 uppercase tracking-wider">{group.label}</div>
+                      {group.note && <div className="text-xs text-stone-500 mb-1">{group.note}</div>}
+                      <div className="grid grid-cols-2 gap-1">
+                        {group.gpus.map((gpu) => {
+                          const st = paramNum > 0 ? gpuStatus(gpu.vram, refQuant.totalGB) : 'idle';
+                          const bg = st === 'ok' ? 'bg-lime-50' : st === 'tight' ? 'bg-amber-50' : 'bg-stone-50';
+                          const tx = st === 'ok' ? 'text-lime-800' : st === 'tight' ? 'text-amber-700' : 'text-stone-400';
+                          const sub = st === 'ok' ? 'text-lime-500' : st === 'tight' ? 'text-amber-500' : 'text-stone-300';
+                          const icon = st === 'ok' ? '✓' : st === 'tight' ? '⚠' : st === 'no' ? '✗' : '—';
+                          return (
+                            <div key={gpu.name} className={`rounded-xl px-2 py-1.5 ${bg}`}>
+                              <div className={`text-xs font-bold leading-tight ${tx}`}>{gpu.name}</div>
+                              <div className={`text-xs ${sub}`}>{gpu.vram}G {icon}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-stone-500 mt-2">Memory fit only; runtime and quantization support vary by GPU.</p>
+              </div>
+            </div>
+
             <div className="flex flex-col gap-3 overflow-auto min-h-0" style={{ maxHeight: 'calc(100vh - 32px)' }}>
               <div className="flex items-center gap-2">
                 <Cpu className="w-5 h-5 text-lime-700 flex-shrink-0" />
@@ -252,36 +317,6 @@
                 </div>
               </div>
 
-              {refQuant && paramNum > 0 && (
-                <div className="bg-white rounded-2xl p-4">
-                  <div className="flex items-baseline justify-between mb-2">
-                    <span className="text-xs font-bold text-stone-400 uppercase tracking-widest">GPU Fit</span>
-                    <span className="text-xs text-stone-500 font-semibold">Q4_K_M · {fmt(refQuant.totalGB)}</span>
-                  </div>
-                  <div className="space-y-2.5">
-                    {gpuGroups.map((group) => (
-                      <div key={group.label}>
-                        <div className="text-xs font-medium text-stone-300 mb-1 uppercase tracking-wider">{group.label}</div>
-                        <div className="grid grid-cols-2 gap-1">
-                          {group.gpus.map((gpu) => {
-                            const st = gpuStatus(gpu.vram, refQuant.totalGB);
-                            const bg = st === 'ok' ? 'bg-lime-50' : st === 'tight' ? 'bg-amber-50' : 'bg-stone-50';
-                            const tx = st === 'ok' ? 'text-lime-800' : st === 'tight' ? 'text-amber-700' : 'text-stone-400';
-                            const sub = st === 'ok' ? 'text-lime-500' : st === 'tight' ? 'text-amber-500' : 'text-stone-300';
-                            const icon = st === 'ok' ? '✓' : st === 'tight' ? '⚠' : '✗';
-                            return (
-                              <div key={gpu.name} className={`rounded-xl px-2 py-1.5 ${bg}`}>
-                                <div className={`text-xs font-bold leading-tight ${tx}`}>{gpu.name}</div>
-                                <div className={`text-xs ${sub}`}>{gpu.vram}G {icon}</div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
 
               <div className="bg-stone-200/40 rounded-2xl px-4 py-3">
                 <div className="flex items-start gap-2">
